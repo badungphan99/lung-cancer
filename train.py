@@ -11,6 +11,7 @@ import random
 path = "/home/dungpb/Work/ComputerVision/Code/Data"
 num_epoch = 10
 dev = "cpu"
+SMOOTH = 1e-6
 if torch.cuda.is_available():
     dev = "cuda:0"
 
@@ -42,6 +43,12 @@ class LoadData(Dataset):
         return image, mask
 
 
+def iou_score(outputs: torch.Tensor, labels: torch.Tensor):
+    intersection = (outputs & labels).sum().item()
+    union = (outputs | labels).sum().item()
+    return (intersection + SMOOTH) / (union + SMOOTH)
+
+
 if __name__ == "__main__":
     now = datetime.now()
     time_stamp = now.strftime("%Y:%m:%d-%H:%M:%S")
@@ -49,7 +56,7 @@ if __name__ == "__main__":
     dataset = LoadData(path)
 
     model = UNet(dimensions=2)
-    optimizer = optim.RMSprop(model.parameters(), lr=0.001, weight_decay=1e-8, momentum=0.9)
+    optimizer = optim.RMSprop(model.parameters(), lr=0.001, weight_decay=1e-6, momentum=0.9)
     criterion = nn.CrossEntropyLoss()
     idx_list = [i for i, _ in enumerate(dataset)]
 
@@ -58,6 +65,7 @@ if __name__ == "__main__":
     for e in range(num_epoch):
         random.shuffle(idx_list)
         sum_loss = 0
+        sum_val = 0
         count = 0
         for idx in idx_list:
             model.train(True)
@@ -65,12 +73,14 @@ if __name__ == "__main__":
             X, Y = dataset[idx]
             y = model(X)
             loss = criterion(y, Y.unsqueeze(0))
+            mask = (torch.sigmoid(y[0, 0]) > 0.5).long()
             sum_loss += loss.item()
+            sum_val += iou_score(mask, Y)
             loss.backward()
             optimizer.step()
             count += 1
-            print(str(count) + "/" + str(l), end='\r')
+            print(str(count) + "/" + str(l) , end='\r')
 
         torch.save(model.state_dict(), model_path)
-        print(sum_loss/len(dataset))
+        print(str(sum_loss/l) + "---" + str(sum_val/l))
 
